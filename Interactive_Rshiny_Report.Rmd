@@ -1,0 +1,363 @@
+---
+title: "Sample Swap Report (Prototype)"
+author: "Prisni Rath, prisni.rath@oicr.on.ca"
+date: "19 January 2021"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(shiny)
+source("swap_report_essentials.R")
+```
+
+
+```{r, echo = F, warning=F}
+# read project run id file
+run.names <- read.csv("/Users/prath/Projects/GSI/Sample_Swap/Real_time/EX/project_run.map", sep = "\t",
+                      as.is = T, header = F)
+names(run.names) <- c("Project Name", "Run ID")
+# head(run.names)
+```
+
+
+
+```{r project heatmap, echo=FALSE}
+inputPanel(
+  selectInput("project", label = "Project name:",
+              choices = c("TGL20", "OCT", "PCSI", "DCIS"), selected = "TGL20"),
+  # load run names based on project selected
+  selectInput("run", label = "Run name:",
+              choices = c("select run id"), selected = "run_id", width = 2000),
+  # output folder to write files
+  textInput("donors", label = "Comma-separated values for Donor IDs of interest",
+              value = "", width = 1000),
+  checkboxInput("projectView", label= "Project Level View", value = FALSE, width = NULL)
+)
+
+
+observe({
+  updateSelectInput(
+    session,
+    "project",
+    choices = unique(run.names$`Project Name`)
+  )
+})
+
+observe({
+  updateSelectInput(
+    session,
+    "run",
+    choices = run.names[run.names$`Project Name` == input$project,]$`Run ID`
+  )
+})
+
+donor_int <- reactive({
+      if(is.null(input$donors)){return(NULL)}
+      return(input$donors)
+    })
+
+observe({
+  fID <- donor_int()
+  if(!is.null(fID))
+    updateTextInput(session, "donors", value = fID)
+    })
+
+
+donorsInt <- reactive({
+  # onclick("donors",updateTextInput(session,"donors",value=""))
+  donors_int <- unlist(strsplit(input$donors, ","))
+  if (length(donors_int) > 0){
+    return (donors_int)
+  } else {
+    return (NULL)
+  }
+})
+
+# renderTable({
+#   run.names[run.names$`Project Name` == input$project,]
+# })
+
+```
+
+```{r, echo = F, warning=F}
+# add beautiful params to this UI
+# text formatting
+renderUI({
+  runInfo <- input$run
+  if(input$projectView){
+    runInfo=NA
+  }
+    HTML(paste(paste0("<strong>Report generated for: ", input$project), 
+               paste0("Run id: ", runInfo),
+               sep ="<br/>"))
+  })
+```
+```{r,echo=F, warning=F}
+inputPanel(
+  checkboxInput("showAnnotations", label= "Show Sample IDs", value = FALSE, width = NULL),
+  checkboxInput("clusterOpt", label= "Cluster heatmap", value = FALSE, width = NULL),
+  checkboxInput("showTreeCuts", label= "Show tree cuts", value = FALSE, width = NULL), # use checkboxinputgroups
+  # checkboxGroupInput("cluteringTest", label = "Cluster heatmap", choiceNames = c("show dendrograms", "show treecuts"), choiceValues = c(FALSE, FALSE)),
+  checkboxInput("displaySampleInfo", label= "Show library info table", value = FALSE, width = NULL),
+  checkboxInput("showLegend", label= "Show legend", value = FALSE, width = NULL),
+  checkboxInput("showNewColors", label = "Assign new colors for donor IDs", value = FALSE, width = NULL),
+  # checkboxInput("dropUnusedLevels", label= "Drop unused levels", value = TRUE, width = NULL),
+  #treeHeight
+  textInput("treeHeight", label = "Height of dendrogram", value = "50"),
+  textInput("scalePlotHeight", label = "Height of the figure", value = "500"),
+  textInput("scalePlotWidth", label = "Width of the figure", value = "700")
+)
+
+
+```
+
+### Sample fingerprinting report
+
+```{r, echo=F, warning=F}
+laneData <- reactive({
+  jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_EX_", input$run, "_jaccard.matrix.csv")
+  if (input$projectView){
+    jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_", "_jaccard.matrix.csv")
+  }
+  
+  jaccard_matrix <- jaccard_matrix_file
+  laneData <- read.delim(file=jaccard_matrix, header = T)
+  return (laneData)
+})
+
+
+sample_miso_donor_map <- reactive({
+  sample_miso_donor_map <- getSampleRunData(laneData())
+  # check for the effective_DonorId
+  sample_miso_donor_map$effective_donorID <- sample_miso_donor_map$miso_donorID
+  sample_miso_donor_map$workingSampleID <- paste0(sample_miso_donor_map$miso_donorID, "_",
+                                                  sample_miso_donor_map$workingSampleID)
+  return (sample_miso_donor_map)
+})
+
+# read reactive/interactive jaccard matrix file
+formatted.SampleMap <- reactive({
+  smp <- sample_miso_donor_map()
+  smp <- smp[,c("effective_donorID",	"workingSampleID")]
+  maskNames <- paste("sample", seq(1,length(smp$workingSampleID)))
+  smp$pseudoID <- maskNames
+  # sort by donor
+  smp <- smp[order(smp$effective_donorID),]
+  return (smp)
+})
+
+formatted.laneData <- reactive({
+  ld <- laneData()
+  smp <- formatted.SampleMap()
+  ld <- ld[,!(colnames(ld) %in% c("X", "SNPs"))]
+  row.names(ld) <- smp$pseudoID
+  colnames(ld) <- smp$pseudoID
+  return (ld)
+})
+
+anot.df <- reactive({
+  smp <- sample_miso_donor_map()
+  anot.df <- data.frame(smp$effective_donorID)
+  names(anot.df) <- "Donor ID"
+  row.names(anot.df) <- smp$pseudoID
+  return (anot.df)
+})
+
+# custom colors
+mycolors_set <- reactive({
+  ad <- anot.df()
+  newCols <- colorRampPalette(grDevices::rainbow(length(unique(ad$`Donor ID`))))
+  mycolors_set <- newCols(length(unique(ad$`Donor ID`)))
+  names(mycolors_set) <- unique(ad$`Donor ID`)
+  mycolors <- list(`Donor ID` = mycolors_set[sort(names(mycolors_set))])
+  return (mycolors)
+})
+
+
+breaksList <- reactive({
+  ld <- formatted.laneData()
+  breaksList <- seq(min(as.matrix(ld)),
+                  max(as.matrix(ld)),
+                  by = 0.05)
+  return(breaksList)
+})
+
+
+
+renderTable({
+  if (input$displaySampleInfo){
+    di <- donorsInt()
+    if( ! is.null(di)){
+      smp <- formatted.SampleMap()
+      smp <- smp[smp$effective_donorID %in% as.character(di), ]
+      smp
+    } else {
+      formatted.SampleMap()
+    }
+  }
+  
+  })
+
+
+
+# use render plot
+renderPlot({
+  ld <- formatted.laneData()
+  smp <- formatted.SampleMap()
+  ad <- data.frame(smp$effective_donorID)
+  names(ad) <- "Donor ID"
+  row.names(ad) <- smp$pseudoID
+  # 
+  
+  di <- donorsInt()
+  if (! is.null(di)){
+    # tot.donors <- length(di)
+    smp <- formatted.SampleMap()
+    smp <- smp[smp$effective_donorID %in% di,]
+    ad <- data.frame(smp$effective_donorID)
+    names(ad) <- "Donor ID"
+    row.names(ad) <- smp$pseudoID
+    ld <- ld[smp$pseudoID, smp$pseudoID]
+  }
+  tot.donors <- length(unique(ad$`Donor ID`))
+  # mycolors <- list(`Donor ID` = mycolors_set[sort(names(mycolors_set))])
+  # option to re-do colors for donors
+  mc <- mycolors_set()
+  if (input$showNewColors){
+    mc <- NA
+  }
+  bl <- breaksList()
+  data_frame = ld
+  tree_cuts = NA
+  if (input$showTreeCuts){
+    tree_cuts = tot.donors
+  }
+  
+  height = 20
+  width = 10
+  # custom_colors = mc
+  annotation_legend = input$showLegend
+  # drop_levels = input$dropUnusedLevels
+  showAnnotations = input$showAnnotations
+  treeheight = as.numeric(input$treeHeight)
+  fontsize = 12
+  pheatmap(as.matrix(data_frame),
+           color = colorRampPalette(rev(brewer.pal(n = 10, 
+                                                   name ="RdYlBu")))(length(bl)),
+           breaks = bl,
+           annotation_row = ad,
+           annotation_col = ad,
+           cluster_rows = input$clusterOpt,
+           cluster_cols = input$clusterOpt,
+           show_rownames = showAnnotations,
+           show_colnames = showAnnotations,
+           cutree_cols = tree_cuts,
+           cutree_rows = tree_cuts,
+           treeheight_row = treeheight, 
+           treeheight_col = treeheight,
+           height = height, width = width,
+           annotation_colors = mc,
+           fontsize = fontsize,
+           annotation_legend = annotation_legend)
+},width = exprToFunction(as.numeric(input$scalePlotWidth)),
+  height = exprToFunction(as.numeric(input$scalePlotHeight)))
+# render plot to only display the heatmap
+
+
+```
+
+### Libraries for further investigation
+
+```{r,echo=F,warning=F}
+inputPanel(
+    sliderInput("threshold_up", label = "Similarity threshold",
+              min = 0.0, max = 1.0, value = 0.9, step = 0.01),
+    sliderInput("threshold_down", label = "Dissimilarity threshold",
+              min = 0.0, max = 1.0, value = 0.65, step = 0.01),
+    checkboxInput("showDissimilarIDs", label= "Show dissimilar libraries", value = FALSE, width = NULL)
+)
+```
+
+
+```{r, echo=F, warning=F}
+# # display possible mismatches
+meltedLaneData <- reactive({
+  laneData2 <- formatted.laneData()
+  smp <- formatted.SampleMap()
+  ad <- data.frame(smp$effective_donorID)
+  names(ad) <- "Donor ID"
+  row.names(ad) <- smp$pseudoID
+  laneData2$`Library ID X` <- row.names(laneData2)
+  laneData2$`Library ID Y` <- colnames(laneData2)[! grepl("Library ID",colnames(laneData2))]
+  laneData.melt <- melt(laneData2, id = c("Library ID X", "Library ID Y"))
+  laneData.melt <- laneData.melt[,c("Library ID X", "variable", "value")]
+  colnames(laneData.melt) <- c("Library ID X", "Library ID Y", "Jaccard Index")
+  laneData.melt$`Donor ID X` <- ad[laneData.melt$`Library ID X`,]
+  laneData.melt$`Donor ID Y` <- ad[laneData.melt$`Library ID Y`,]
+  return(laneData.melt)
+})
+
+
+mm1 <- reactive({
+  ldm <- meltedLaneData()
+  swap.report.donor.mismatch1 <- ldm[as.numeric(ldm$`Jaccard Index`) < as.numeric(input$threshold_down) &
+                                               ldm$`Donor ID X` == ldm$`Donor ID Y`,]
+  return (swap.report.donor.mismatch1)
+  })
+renderUI({
+    HTML(paste(paste0("Samples showing < ", input$threshold_down, " with samples from same donor."),
+               sep ="<br/>"))
+  })
+
+renderTable({
+  if (dim(mm1())[1] > 0){
+    if (input$showDissimilarIDs){
+      unique(mm1())
+    } else {
+        m <- unique(mm1())
+        # names(m) <- "Donors"
+        m <- data.frame(unique(c(m$`Donor ID X`, m$`Donor ID Y`)))
+        names(m) <- "Donor IDs with samples showing dissimilarity with samples from same donors"
+        m
+      }
+    }
+})
+
+
+```
+
+
+```{r,echo=F,warning=F}
+# check for mm2
+# display possible mismatches
+mm2 <- reactive({
+  ldm <- meltedLaneData()
+  swap.report.donor.mismatch2 <- ldm[as.numeric(ldm$`Jaccard Index`) >= as.numeric(input$threshold_up) &
+                                               ldm$`Donor ID X` != ldm$`Donor ID Y`,]
+  return (swap.report.donor.mismatch2)
+  })
+renderUI({
+    HTML(paste(paste0("Samples showing >= ", input$threshold_up, " with samples from other donors."),
+               sep ="<br/>"))
+  })
+# 
+renderTable({
+  if (dim(mm2())[1] > 0){
+    if (input$showDissimilarIDs){
+      unique(mm2())
+    } else {
+        m <- unique(mm2())
+        # names(m) <- "Donors"
+        m <- data.frame(unique(c(m$`Donor ID X`, m$`Donor ID Y`)))
+        names(m) <- "Donor IDs with samples showing high similarity with other donors"
+        m
+      }
+    }
+})
+
+
+
+```
+

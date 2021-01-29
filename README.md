@@ -3,6 +3,7 @@
 R version: 4.0 above
 
 Dependencies:
+
 pheatmap
 ggplot2
 reshape2
@@ -11,10 +12,12 @@ flexdashboard
 stringr
 RColorBrewer
 viridis
+knitr
+rmarkdown
 
 Execute:
 git clone https://github.com/oicr-gsi/SAUCR.git
 cd SAUCR
 Rscript run.R
 
-Check the URL: http://0.0.0.0:9999/ on your browser
+Check the URL: http://0.0.0.0:3838/ on your browser

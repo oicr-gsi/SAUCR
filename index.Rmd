@@ -27,10 +27,18 @@ source("Rscript/swap_report_essentials.R")
 
 
 ```{r, echo = F, warning=F}
-# read project run id file
-run.names <- read.csv("data/project_run.map", sep = "\t",
-                      as.is = T, header = F)
-names(run.names) <- c("Project Name", "Run ID")
+# info about the all projects 
+master.report <- read.csv(paste0("data/EX_finentry.txt"), header = F, as.is = T)
+names(master.report) <- c("Donor ID", "MISO ID", "Run ID", "Lane num", "Tissue Type", "Tissue Site", "finfile", "Sample ID", 
+                          "Hotspots", "SNPs with no coverage", "no alts", "alt")
+master.report$`Project Name` <- stringr::str_split_fixed(master.report$`MISO ID`, "_", 2)[,1] # should be a part of already existing entry
+master.report$`SNPs with coverage` <- master.report$Hotspots - master.report$`SNPs with no coverage`
+master.report$`pct Hotpots covered` <- master.report$`SNPs with coverage`/master.report$Hotspot
+master.report <- master.report[!duplicated(master.report),]
+
+projects <- unique(master.report$`Project Name`)
+# projects
+# names(master.report)
 # head(run.names)
 ```
 Sidebar {.sidebar data-width=300}
@@ -40,33 +48,45 @@ Sidebar {.sidebar data-width=300}
 <style> body {background-color: #E7ECE1;} </style>
 
 ```{r project heatmap, echo=FALSE}
+# select project to load the next but of info
+
 inputPanel(
   selectInput("project", label = "Project name:",
-              choices = c("TGL20", "OCT", "PCSI", "DCIS"), selected = "TGL20"),
+              choices = projects, selected = "project_name")
+)
+
+observe({
+  updateSelectInput(
+    session,
+    "project",
+    choices = unique(master.report$`Project Name`)
+  )
+})
+
+
+```
+\
+```{r, echo=F, warning=F}
+
+# select runs based on project file
+
+inputPanel(
   # load run names based on project selected
   selectInput("run", label = "Run name:",
               choices = c("select run id"), selected = "run_id", width = 2000),
   # output folder to write files
   textInput("donors", label = "Comma-separated values for Donor IDs of interest",
               value = "", width = 1000),
-  checkboxInput("projectView", label= "Project Level View", value = FALSE, width = NULL),
-    checkboxInput("displaySampleInfo", label= "Show library info table", value = TRUE, width = NULL)
-)
-
-
-observe({
-  updateSelectInput(
-    session,
-    "project",
-    choices = unique(run.names$`Project Name`)
+  checkboxInput("projectView", label= "Project Level View", value = TRUE, width = NULL),
+  checkboxInput("displaySampleInfo", label= "Show library info table", value = TRUE, width = NULL)
   )
-})
 
+# master.report <- observe(loadProjectMaster(), quoted = T)
 observe({
   updateSelectInput(
-    session,
+    session ,
     "run",
-    choices = run.names[run.names$`Project Name` == input$project,]$`Run ID`
+    choices = unique(master.report$`Run ID`)
   )
 })
 
@@ -92,8 +112,8 @@ donorsInt <- reactive({
   }
 })
 
-
 ```
+
 \
 ```{r, echo = F, warning=F}
 # add beautiful params to this UI
@@ -134,40 +154,27 @@ inputPanel(
   textInput("scalePlotWidth", label = "Width of the figure", value = "700")
 )
 
-
 ```
 
 
 ```{r, echo=F, warning=F}
 laneData <- reactive({
-  jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_EX_", input$run, "_jaccard.matrix.csv")
-  if (input$projectView){
-    jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_", "_jaccard.matrix.csv")
-  }
-  
+  # jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_EX_", input$run, "_jaccard.matrix.csv")
+  # if (input$projectView){
+  jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_jaccard.matrix.csv")
   jaccard_matrix <- jaccard_matrix_file
   laneData <- read.delim(file=jaccard_matrix, header = T)
   return (laneData)
 })
 
-
-sample_miso_donor_map <- reactive({
-  sample_miso_donor_map <- getSampleRunData(laneData())
-  # check for the effective_DonorId
-  sample_miso_donor_map$effective_donorID <- sample_miso_donor_map$miso_donorID
-  sample_miso_donor_map$workingSampleID <- paste0(sample_miso_donor_map$miso_donorID, "_",
-                                                  sample_miso_donor_map$workingSampleID)
-  return (sample_miso_donor_map)
-})
-
 # read reactive/interactive jaccard matrix file
 formatted.SampleMap <- reactive({
-  smp <- sample_miso_donor_map()
-  smp <- smp[,c("effective_donorID",	"workingSampleID")]
-  maskNames <- paste("sample", seq(1,length(smp$workingSampleID)))
-  smp$pseudoID <- maskNames
-  # sort by donor
-  smp <- smp[order(smp$effective_donorID),]
+  smp <- master.report[master.report$`Project Name` == input$project,]
+  columns_keep <- c("Donor ID","MISO ID","Run ID","Lane num","Tissue Type", 
+                    "Tissue Site","Sample ID", "Hotspots","SNPs with no coverage", "no alts", "alt",
+                    "Project Name","SNPs with coverage","pct Hotpots covered")
+  smp <- smp[,columns_keep]
+  smp <- smp[!duplicated(smp),]
   return (smp)
 })
 
@@ -175,16 +182,20 @@ formatted.laneData <- reactive({
   ld <- laneData()
   smp <- formatted.SampleMap()
   ld <- ld[,!(colnames(ld) %in% c("X", "SNPs"))]
-  row.names(ld) <- smp$pseudoID
-  colnames(ld) <- smp$pseudoID
+  row.names(ld) <- colnames(ld)
+  if (!input$projectView){
+    ri <- input$run
+    smp <- smp[smp$`Run ID` == ri,]
+    ld <- ld[smp$`Sample ID`, smp$`Sample ID`]
+  }
   return (ld)
 })
 
 anot.df <- reactive({
-  smp <- sample_miso_donor_map()
-  anot.df <- data.frame(smp$effective_donorID)
+  smp <- formatted.SampleMap()
+  anot.df <- data.frame(smp$`Donor ID`)
   names(anot.df) <- "Donor ID"
-  row.names(anot.df) <- smp$pseudoID
+  row.names(anot.df) <- smp$`Sample ID`
   return (anot.df)
 })
 
@@ -213,22 +224,24 @@ breaksList <- reactive({
 renderPlot({
   ld <- formatted.laneData()
   smp <- formatted.SampleMap()
-  ad <- data.frame(smp$effective_donorID)
-  names(ad) <- "Donor ID"
-  row.names(ad) <- smp$pseudoID
+  anot.df <- data.frame(smp$`Donor ID`)
+  names(anot.df) <- "Donor ID"
+  row.names(anot.df) <- smp$`Sample ID`
   # 
-  
+  # ad <- anot.df
+  # specific donors
   di <- donorsInt()
   if (! is.null(di)){
     # tot.donors <- length(di)
     smp <- formatted.SampleMap()
-    smp <- smp[smp$effective_donorID %in% di,]
-    ad <- data.frame(smp$effective_donorID)
-    names(ad) <- "Donor ID"
-    row.names(ad) <- smp$pseudoID
-    ld <- ld[smp$pseudoID, smp$pseudoID]
+    smp <- smp[smp$`Donor ID` %in% di,]
+    anot.df <- data.frame(smp$`Donor ID`)
+    names(anot.df) <- "Donor ID"
+    row.names(anot.df) <- smp$`Sample ID`
+    ld <- ld[smp$`Sample ID`, smp$`Sample ID`]
   }
-  tot.donors <- length(unique(ad$`Donor ID`))
+  # specific run id
+  tot.donors <- length(unique(anot.df$`Donor ID`))
   # mycolors <- list(`Donor ID` = mycolors_set[sort(names(mycolors_set))])
   # option to re-do colors for donors
   mc <- mycolors_set()
@@ -254,8 +267,8 @@ renderPlot({
            color = colorRampPalette(rev(brewer.pal(n = 10, 
                                                    name ="RdYlBu")))(length(bl)),
            breaks = bl,
-           annotation_row = ad,
-           annotation_col = ad,
+           annotation_row = anot.df,
+           annotation_col = anot.df,
            cluster_rows = input$clusterOpt,
            cluster_cols = input$clusterOpt,
            show_rownames = showAnnotations,
@@ -277,14 +290,24 @@ renderPlot({
 
 ```{r, echo = F, warning=F}
 renderTable({
+  columns_keep <- c("Project Name","Donor ID","MISO ID","Run ID","Lane num","Tissue Type", 
+                    "Tissue Site","Hotspots","SNPs with no coverage", 
+                    "SNPs with coverage","pct Hotpots covered")
   if (input$displaySampleInfo){
     di <- donorsInt()
     if( ! is.null(di)){
       smp <- formatted.SampleMap()
-      smp <- smp[smp$effective_donorID %in% as.character(di), ]
-      smp
+      smp <- smp[smp$`Donor ID` %in% as.character(di), ]
+      smp[,columns_keep]
     } else {
-      formatted.SampleMap()
+      if (!input$projectView){
+        smp <- formatted.SampleMap()
+        smp <- smp[smp$`Run ID` == as.character(input$run), ]
+        smp[,columns_keep]
+      }else{
+      smp <- formatted.SampleMap()
+      smp[,columns_keep]
+      }
     }
   }
   })
@@ -318,9 +341,9 @@ inputPanel(
 meltedLaneData <- reactive({
   laneData2 <- formatted.laneData()
   smp <- formatted.SampleMap()
-  ad <- data.frame(smp$effective_donorID)
+  ad <- data.frame(smp$`Donor ID`)
   names(ad) <- "Donor ID"
-  row.names(ad) <- smp$pseudoID
+  row.names(ad) <- smp$`Sample ID`
   laneData2$`Library ID X` <- row.names(laneData2)
   laneData2$`Library ID Y` <- colnames(laneData2)[! grepl("Library ID",colnames(laneData2))]
   laneData.melt <- melt(laneData2, id = c("Library ID X", "Library ID Y"))
@@ -338,25 +361,7 @@ mm1 <- reactive({
                                                ldm$`Donor ID X` == ldm$`Donor ID Y`,]
   return (swap.report.donor.mismatch1)
   })
-# renderUI({
-#     HTML(paste(paste0("Samples showing < ", input$threshold_down, " with samples from same donor."),
-#                sep ="<br/>"))
-#   })
-# 
-# renderTable({
-#   if (dim(mm1())[1] > 0){
-#     if (input$showDissimilarIDs){
-#       unique(mm1())
-#     } else {
-#         m <- unique(mm1())
-#         # names(m) <- "Donors"
-#         m <- data.frame(unique(c(m$`Donor ID X`, m$`Donor ID Y`)))
-#         names(m) <- "Donor IDs with samples showing dissimilarity with samples from same donors"
-#         m
-#       }
-#     }
-# })
-# 
+
 ```
 
 ```{r,echo=F,warning=F}
@@ -368,26 +373,6 @@ mm2 <- reactive({
                                                ldm$`Donor ID X` != ldm$`Donor ID Y`,]
   return (swap.report.donor.mismatch2)
   })
-# renderUI({
-#     HTML(paste(paste0("Samples showing >= ", input$threshold_up, " with samples from other donors."),
-#                sep ="<br/>"))
-#   })
-# 
-# renderTable({
-#   if (dim(mm2())[1] > 0){
-#     if (input$showDissimilarIDs){
-#       unique(mm2())
-#     } else {
-#         m <- unique(mm2())
-#         # names(m) <- "Donors"
-#         m <- data.frame(unique(c(m$`Donor ID X`, m$`Donor ID Y`)))
-#         names(m) <- "Donor IDs with samples showing high similarity with other donors"
-#         m
-#       }
-#     }
-# })
-
-
 
 ```
 

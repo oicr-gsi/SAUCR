@@ -83,25 +83,31 @@ inputPanel(
   selectInput("run", label = "Run name:",
               choices = c("select run id"), selected = "run_id", multiple = T, width = 2000),
   # output folder to write files
-  selectInput("donors", label = "Select Donor IDs (works for Project View only)",
+  selectInput("donors", label = "Select Donor IDs",
               choices = c("select donor id"), selected = "donor_id", multiple = T, width = 2000),
   checkboxInput("projectView", label= "Project Level View", value = TRUE, width = NULL),
   checkboxInput("displaySampleInfo", label= "Show library info table", value = TRUE, width = NULL)
   )
 
+runID <- reactive({
+  runID <- unique(master.report[master.report$`Project Name` == input$`project`,]$`Run ID`)
+  return(runID)
+})
+
 observe({
   updateSelectInput(
     session ,
     "run",
-    choices = unique(master.report$`Run ID`)
+    choices = runID()
   )
 })
 
 donorID <- reactive({
-  donorID <- unique(master.report$`Donor ID`)
-  # if (!input$`projectView`){
-  #   donorID <- unique(master.report[master.report$`Run ID` %in% input$`run`]$`Donor ID`)
-  # }
+  donorID <- unique(master.report[master.report$`Project Name` == input$`project`,]$`Donor ID`)
+  if (!input$`projectView`){
+    donorID <- unique(master.report[master.report$`Run ID` %in% input$`run` &
+                                      master.report$`Project Name` == input$`project`,]$`Donor ID`)
+  }
   return(donorID)
 })
 
@@ -147,13 +153,10 @@ Row
 inputPanel(
   checkboxInput("showAnnotations", label= "Show Sample IDs", value = FALSE, width = NULL),
   checkboxInput("clusterOpt", label= "Cluster heatmap", value = FALSE, width = NULL),
-  checkboxInput("cutTreeByDonor", label= "Split plot by Donor", value = FALSE, width = NULL), # use checkboxinputgroups
+  checkboxInput("cutTreeByDonor", label= "Split plot by Donor", value = FALSE, width = NULL),
   checkboxInput("cutTreeByRun", label= "Split plot by Run", value = FALSE, width = NULL),
-  #
   checkboxInput("rescalePlot", label= "Rescale the heatmap", value = FALSE, width = NULL),
   checkboxInput("showLegend", label= "Show legend", value = FALSE, width = NULL),
-  # checkboxInput("showNewColors", label = "Assign new colors for donor IDs", value = FALSE, width = NULL),
-  # textInput("treeHeight", label = "Height of dendrogram", value = "50"),
   textInput("scalePlotHeight", label = "Height of the figure", value = "500"),
   textInput("scalePlotWidth", label = "Width of the figure", value = "700"),
   sliderInput("resize", label = "Size of figure",
@@ -165,8 +168,6 @@ inputPanel(
 
 ```{r, echo=F, warning=F}
 laneData <- reactive({
-  # jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_EX_", input$run, "_jaccard.matrix.csv")
-  # if (input$projectView){
   jaccard_matrix_file <- paste0("data/", input$project, "/", input$project, "_jaccard.matrix.csv")
   jaccard_matrix <- jaccard_matrix_file
   laneData <- read.delim(file=jaccard_matrix, header = T)
@@ -221,22 +222,21 @@ renderPlot({
   ld <- formatted.laneData()
   data_frame = as.matrix(ld)
   min.val <- 0
-  mid.val <- 0.5
+  # mid.val <- 0.5
   max.val <- 1
   
   # if rescale
   if (input$`rescalePlot`){
     min.val <- min(data_frame)
-    mid.val <- median(data_frame)
+    # mid.val <- median(data_frame)
     max.val <- max(data_frame)
   }
 
-  col_fun = colorRamp2(c(min.val, mid.val, max.val), c("#e5583e", "white", "#00cccc"))
+  # col_fun = colorRamp2(c(min.val, mid.val, max.val), c("#e5583e", "white", "#00cccc"))
+  col_fun = colorRamp2(c(min.val, max.val), c("white", "blue"))
 
   rowlabs <- rownames(data_frame) # format this later
   collabs <-  colnames(data_frame) # format this later
-  # rowlabs <- gsub("_", "\n", rownames(data_frame)) # format this later
-  # collabs <-  gsub("_", "\n", colnames(data_frame)) # format this later
   
   # annotations
   annotation_df <- formatted.SampleMap()

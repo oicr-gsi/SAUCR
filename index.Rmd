@@ -152,8 +152,8 @@ inputPanel(
   #
   checkboxInput("rescalePlot", label= "Rescale the heatmap", value = FALSE, width = NULL),
   checkboxInput("showLegend", label= "Show legend", value = FALSE, width = NULL),
-  checkboxInput("showNewColors", label = "Assign new colors for donor IDs", value = FALSE, width = NULL),
-  textInput("treeHeight", label = "Height of dendrogram", value = "50"),
+  # checkboxInput("showNewColors", label = "Assign new colors for donor IDs", value = FALSE, width = NULL),
+  # textInput("treeHeight", label = "Height of dendrogram", value = "50"),
   textInput("scalePlotHeight", label = "Height of the figure", value = "500"),
   textInput("scalePlotWidth", label = "Width of the figure", value = "700"),
   sliderInput("resize", label = "Size of figure",
@@ -332,23 +332,11 @@ renderTable({
   columns_keep <- c("Project Name","Donor ID","MISO ID","Run ID","Lane num","Tissue Type", 
                     "Tissue Site","Hotspots","SNPs with no coverage", 
                     "SNPs with coverage","pct Hotpots covered")
-  if (input$displaySampleInfo){
-    di <- donorsInt()
-    if( ! is.null(di)){
-      smp <- formatted.SampleMap()
-      smp <- smp[smp$`Donor ID` %in% as.character(di), ]
-      smp[,columns_keep]
-    } else {
-      if (!input$projectView){
-        smp <- formatted.SampleMap()
-        smp <- smp[smp$`Run ID` == as.character(input$run), ]
-        smp[,columns_keep]
-      }else{
-      smp <- formatted.SampleMap()
-      smp[,columns_keep]
-      }
-    }
-  }
+  smp <- formatted.SampleMap()
+  # sort by RUN ID in reverse order
+  # smp$`Run ID` <- factor(smp$`Run ID`,
+  #                 levels = unique(smp$`Run ID`)[order(unique(smp$`Run ID`),decreasing = T)])
+  smp[,columns_keep]
   })
 ```
 

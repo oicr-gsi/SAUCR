@@ -19,9 +19,13 @@ color:#dedbdd!important;
 
 
 ```{r setup, include=FALSE}
+set.seed(123)
 knitr::opts_chunk$set(echo = TRUE)
 library(shiny)
 library(ggplot2)
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(circlize)
 source("Rscript/swap_report_essentials.R")
 ```
 
@@ -29,9 +33,13 @@ source("Rscript/swap_report_essentials.R")
 ```{r, echo = F, warning=F}
 # info about the all projects 
 master.report <- read.csv(paste0("data/EX_finentry.txt"), header = F, as.is = T)
-names(master.report) <- c("Donor ID", "MISO ID", "Run ID", "Lane num", "Tissue Type", "Tissue Site", "finfile", "Sample ID", 
-                          "Hotspots", "SNPs with no coverage", "no alts", "alt")
-master.report$`Project Name` <- stringr::str_split_fixed(master.report$`MISO ID`, "_", 2)[,1] # should be a part of already existing entry
+names(master.report) <- c("Project Name", "Donor ID", "MISO ID", 
+                          "Run ID", "Lane num", 
+                          "Tissue Type", "Tissue Site", 
+                          "finfile", "Sample ID", 
+                          "Hotspots", "SNPs with no coverage", 
+                          "no alts", "alt")
+# master.report$`Project Name` <- stringr::str_split_fixed(master.report$`MISO ID`, "_", 2)[,1] # should be a part of already existing entry
 master.report$`SNPs with coverage` <- master.report$Hotspots - master.report$`SNPs with no coverage`
 master.report$`pct Hotpots covered` <- master.report$`SNPs with coverage`/master.report$Hotspot
 master.report <- master.report[!duplicated(master.report),]
@@ -54,7 +62,7 @@ inputPanel(
   selectInput("project", label = "Project name:",
               choices = projects, selected = "project_name")
 )
-
+# adding multiple project names
 observe({
   updateSelectInput(
     session,
@@ -73,15 +81,14 @@ observe({
 inputPanel(
   # load run names based on project selected
   selectInput("run", label = "Run name:",
-              choices = c("select run id"), selected = "run_id", width = 2000),
+              choices = c("select run id"), selected = "run_id", multiple = T, width = 2000),
   # output folder to write files
-  textInput("donors", label = "Comma-separated values for Donor IDs of interest",
-              value = "", width = 1000),
+  selectInput("donors", label = "Select Donor IDs (works for Project View only)",
+              choices = c("select donor id"), selected = "donor_id", multiple = T, width = 2000),
   checkboxInput("projectView", label= "Project Level View", value = TRUE, width = NULL),
   checkboxInput("displaySampleInfo", label= "Show library info table", value = TRUE, width = NULL)
   )
 
-# master.report <- observe(loadProjectMaster(), quoted = T)
 observe({
   updateSelectInput(
     session ,
@@ -90,26 +97,24 @@ observe({
   )
 })
 
-donor_int <- reactive({
-      if(is.null(input$donors)){return(NULL)}
-      return(input$donors)
-    })
+donorID <- reactive({
+  donorID <- unique(master.report$`Donor ID`)
+  # if (!input$`projectView`){
+  #   donorID <- unique(master.report[master.report$`Run ID` %in% input$`run`]$`Donor ID`)
+  # }
+  return(donorID)
+})
 
-observe({
-  fID <- donor_int()
-  if(!is.null(fID))
-    updateTextInput(session, "donors", value = fID)
-    })
-
+reactive(observe({
+  updateSelectInput(
+    session ,
+    "donors",
+    choices = donorID()
+  )
+}))
 
 donorsInt <- reactive({
-  # onclick("donors",updateTextInput(session,"donors",value=""))
-  donors_int <- unlist(strsplit(input$donors, ","))
-  if (length(donors_int) > 0){
-    return (donors_int)
-  } else {
-    return (NULL)
-  }
+  return (input$`donors`)
 })
 
 ```
@@ -123,8 +128,8 @@ renderUI({
   if(input$projectView){
     runInfo=NA
   }
-    HTML(paste(paste0("<strong>Report generated for: ", input$project), 
-               paste0("Run id: ", runInfo),
+    HTML(paste(paste0("<strong>Report generated for project(s): ", input$project), 
+               paste0("Run id(s): ", runInfo),
                sep ="<br/>"))
   })
 ```
@@ -132,10 +137,7 @@ renderUI({
 \
 \
 \
-\
-\
-Application author: [Prisni Rath](prisni.rath@oicr.on.ca) \
-[Ontario Institute for Cancer Research](https://genomics.oicr.on.ca/) \
+
 
 Sample fingerprinting report
 =====================================
@@ -145,13 +147,17 @@ Row
 inputPanel(
   checkboxInput("showAnnotations", label= "Show Sample IDs", value = FALSE, width = NULL),
   checkboxInput("clusterOpt", label= "Cluster heatmap", value = FALSE, width = NULL),
-  checkboxInput("showTreeCuts", label= "Show tree cuts", value = FALSE, width = NULL), # use checkboxinputgroups
-  # checkboxGroupInput("cluteringTest", label = "Cluster heatmap", choiceNames = c("show dendrograms", "show treecuts"), choiceValues = c(FALSE, FALSE)),
+  checkboxInput("cutTreeByDonor", label= "Split plot by Donor", value = FALSE, width = NULL), # use checkboxinputgroups
+  checkboxInput("cutTreeByRun", label= "Split plot by Run", value = FALSE, width = NULL),
+  #
+  checkboxInput("rescalePlot", label= "Rescale the heatmap", value = FALSE, width = NULL),
   checkboxInput("showLegend", label= "Show legend", value = FALSE, width = NULL),
   checkboxInput("showNewColors", label = "Assign new colors for donor IDs", value = FALSE, width = NULL),
   textInput("treeHeight", label = "Height of dendrogram", value = "50"),
   textInput("scalePlotHeight", label = "Height of the figure", value = "500"),
-  textInput("scalePlotWidth", label = "Width of the figure", value = "700")
+  textInput("scalePlotWidth", label = "Width of the figure", value = "700"),
+  sliderInput("resize", label = "Size of figure",
+              min = 10, max = 20, value = 10, step = 1)
 )
 
 ```
@@ -171,10 +177,18 @@ laneData <- reactive({
 formatted.SampleMap <- reactive({
   smp <- master.report[master.report$`Project Name` == input$project,]
   columns_keep <- c("Donor ID","MISO ID","Run ID","Lane num","Tissue Type", 
-                    "Tissue Site","Sample ID", "Hotspots","SNPs with no coverage", "no alts", "alt",
-                    "Project Name","SNPs with coverage","pct Hotpots covered")
+                    "Tissue Site","Sample ID", "Hotspots","SNPs with no coverage", "no alts",
+                    "alt", "Project Name","SNPs with coverage","pct Hotpots covered")
   smp <- smp[,columns_keep]
   smp <- smp[!duplicated(smp),]
+  if (!input$`projectView`){
+    smp <- smp[smp$`Run ID` %in% input$`run`,]
+  }
+  di <- donorsInt()
+  if (! is.null(di)){
+    smp <- smp[smp$`Donor ID` %in% di,]
+  }
+  row.names(smp) <- smp$`Sample ID`
   return (smp)
 })
 
@@ -185,108 +199,133 @@ formatted.laneData <- reactive({
   row.names(ld) <- colnames(ld)
   if (!input$projectView){
     ri <- input$run
-    smp <- smp[smp$`Run ID` == ri,]
+    smp <- smp[smp$`Run ID` %in% ri,]
+    ld <- ld[smp$`Sample ID`, smp$`Sample ID`]
+  }
+  # by donors
+  di <- donorsInt()
+  if (! is.null(di)){
+    smp <- smp[smp$`Donor ID` %in% di,]
     ld <- ld[smp$`Sample ID`, smp$`Sample ID`]
   }
   return (ld)
 })
 
-anot.df <- reactive({
-  smp <- formatted.SampleMap()
-  anot.df <- data.frame(smp$`Donor ID`)
-  names(anot.df) <- "Donor ID"
-  row.names(anot.df) <- smp$`Sample ID`
-  return (anot.df)
-})
 
-# custom colors
-mycolors_set <- reactive({
-  ad <- anot.df()
-  newCols <- colorRampPalette(grDevices::rainbow(length(unique(ad$`Donor ID`))))
-  mycolors_set <- newCols(length(unique(ad$`Donor ID`)))
-  names(mycolors_set) <- unique(ad$`Donor ID`)
-  mycolors <- list(`Donor ID` = mycolors_set[sort(names(mycolors_set))])
-  return (mycolors)
-})
-
-
-breaksList <- reactive({
-  ld <- formatted.laneData()
-  breaksList <- seq(min(as.matrix(ld)),
-                  max(as.matrix(ld)),
-                  by = 0.05)
-  return(breaksList)
-})
 ```
+\
 
-```{r, echo = F, warning=F}
-# use render plot
+```{r, echo=F, warning=F}
+
 renderPlot({
   ld <- formatted.laneData()
-  smp <- formatted.SampleMap()
-  anot.df <- data.frame(smp$`Donor ID`)
-  names(anot.df) <- "Donor ID"
-  row.names(anot.df) <- smp$`Sample ID`
-  # 
-  # ad <- anot.df
-  # specific donors
-  di <- donorsInt()
-  if (! is.null(di)){
-    # tot.donors <- length(di)
-    smp <- formatted.SampleMap()
-    smp <- smp[smp$`Donor ID` %in% di,]
-    anot.df <- data.frame(smp$`Donor ID`)
-    names(anot.df) <- "Donor ID"
-    row.names(anot.df) <- smp$`Sample ID`
-    ld <- ld[smp$`Sample ID`, smp$`Sample ID`]
-  }
-  # specific run id
-  tot.donors <- length(unique(anot.df$`Donor ID`))
-  # mycolors <- list(`Donor ID` = mycolors_set[sort(names(mycolors_set))])
-  # option to re-do colors for donors
-  mc <- mycolors_set()
-  if (input$showNewColors){
-    mc <- NA
-  }
-  bl <- breaksList()
-  data_frame = ld
-  tree_cuts = NA
-  if (input$showTreeCuts){
-    tree_cuts = tot.donors
-  }
+  data_frame = as.matrix(ld)
+  min.val <- 0
+  mid.val <- 0.5
+  max.val <- 1
   
-  height = 20
-  width = 10
-  # custom_colors = mc
-  annotation_legend = input$showLegend
-  # drop_levels = input$dropUnusedLevels
-  showAnnotations = input$showAnnotations
-  treeheight = as.numeric(input$treeHeight)
-  fontsize = 12
-  pheatmap(as.matrix(data_frame),
-           color = colorRampPalette(rev(brewer.pal(n = 10, 
-                                                   name ="RdYlBu")))(length(bl)),
-           breaks = bl,
-           annotation_row = anot.df,
-           annotation_col = anot.df,
-           cluster_rows = input$clusterOpt,
-           cluster_cols = input$clusterOpt,
-           show_rownames = showAnnotations,
-           show_colnames = showAnnotations,
-           cutree_cols = tree_cuts,
-           cutree_rows = tree_cuts,
-           treeheight_row = treeheight, 
-           treeheight_col = treeheight,
-           height = height, width = width,
-           annotation_colors = mc,
-           fontsize = fontsize,
-           annotation_legend = annotation_legend)
+  # if rescale
+  if (input$`rescalePlot`){
+    min.val <- min(data_frame)
+    mid.val <- median(data_frame)
+    max.val <- max(data_frame)
+  }
+
+  col_fun = colorRamp2(c(min.val, mid.val, max.val), c("#e5583e", "white", "#00cccc"))
+
+  rowlabs <- rownames(data_frame) # format this later
+  collabs <-  colnames(data_frame) # format this later
+  # rowlabs <- gsub("_", "\n", rownames(data_frame)) # format this later
+  # collabs <-  gsub("_", "\n", colnames(data_frame)) # format this later
+  
+  # annotations
+  annotation_df <- formatted.SampleMap()
+  annotation_df <- annotation_df[rowlabs,]
+
+  anno1 <- HeatmapAnnotation(runInfo = annotation_df[,c("Run ID")],
+                             border = TRUE,
+                             show_legend = input$`showLegend`,
+                             simple_anno_size = unit(1, "cm"))
+  anno2 <- rowAnnotation(donorInfo = annotation_df[,c("Donor ID")], 
+                         border = TRUE, 
+                         show_legend = input$`showLegend`,
+                         simple_anno_size = unit(1, "cm"))
+  
+  
+  hm <- Heatmap(data_frame, name = "Jaccard scores",
+                col = col_fun,
+                row_names_gp = gpar(fontsize = 8),
+                column_names_gp = gpar(fontsize = 8),
+                top_annotation = anno1,
+                left_annotation = anno2,
+                row_names_side = "left",
+                cluster_columns = input$`clusterOpt`,
+                cluster_rows = input$`clusterOpt`,
+                row_labels = rowlabs,
+                column_labels = collabs,
+          show_column_names = input$`showAnnotations`,
+          show_row_names = input$`showAnnotations`,
+          # show_l = F,
+          width = unit(input$`resize`, "cm"), height = unit(input$`resize`, "cm"))
+  if (input$`cutTreeByDonor` & !input$`cutTreeByRun`){
+      hm <- Heatmap(data_frame, name = "Jaccard scores",
+          # row_km = length(unique(annotation_df$`Run ID`)),
+          row_km = length(unique(annotation_df$`Donor ID`)),
+                col = col_fun,
+                row_names_gp = gpar(fontsize = 10),
+                column_names_gp = gpar(fontsize = 12),
+                top_annotation = anno1,
+                left_annotation = anno2,
+                row_names_side = "left",
+                cluster_columns = input$`clusterOpt`,
+                cluster_rows = input$`clusterOpt`,
+                row_labels = rowlabs,
+                column_labels = collabs,
+          show_column_names = input$`showAnnotations`,
+          show_row_names = input$`showAnnotations`,
+          # show_l = F,
+          width = unit(input$`resize`, "cm"), height = unit(input$`resize`, "cm"))
+  }
+  if (input$`cutTreeByRun` & !input$`cutTreeByDonor`){
+      hm <- Heatmap(data_frame, name = "Jaccard scores",
+          column_km = length(unique(annotation_df$`Run ID`)),
+          # column_km = length(unique(annotation_df$`Donor ID`)),
+                col = col_fun,
+                row_names_gp = gpar(fontsize = 10),
+                column_names_gp = gpar(fontsize = 12),
+                top_annotation = anno1,
+                left_annotation = anno2,
+                row_names_side = "left",
+                cluster_columns = input$`clusterOpt`,
+                cluster_rows = input$`clusterOpt`,
+                row_labels = rowlabs,
+                column_labels = collabs,
+          show_column_names = input$`showAnnotations`,
+          show_row_names = input$`showAnnotations`,
+          width = unit(input$`resize`, "cm"), height = unit(input$`resize`, "cm"))
+  }
+  if (input$`cutTreeByRun` & input$`cutTreeByDonor`){
+      hm <- Heatmap(data_frame, name = "Jaccard scores",
+          column_km = length(unique(annotation_df$`Run ID`)),
+          row_km = length(unique(annotation_df$`Donor ID`)),
+                col = col_fun,
+                row_names_gp = gpar(fontsize = 10),
+                column_names_gp = gpar(fontsize = 12),
+                top_annotation = anno1,
+                left_annotation = anno2,
+                row_names_side = "left",
+                cluster_columns = input$`clusterOpt`,
+                cluster_rows = input$`clusterOpt`,
+                row_labels = rowlabs,
+                column_labels = collabs,
+          show_column_names = input$`showAnnotations`,
+          show_row_names = input$`showAnnotations`,
+          width = unit(input$`resize`, "cm"), height = unit(input$`resize`, "cm"))
+  }
+  print (hm)
 },width = exprToFunction(as.numeric(input$scalePlotWidth)),
   height = exprToFunction(as.numeric(input$scalePlotHeight)))
-# render plot to only display the heatmap
-
 ```
-
 
 ```{r, echo = F, warning=F}
 renderTable({
@@ -357,8 +396,8 @@ meltedLaneData <- reactive({
 
 mm1 <- reactive({
   ldm <- meltedLaneData()
-  swap.report.donor.mismatch1 <- ldm[as.numeric(ldm$`Jaccard Index`) < as.numeric(input$threshold_down) &
-                                               ldm$`Donor ID X` == ldm$`Donor ID Y`,]
+  swap.report.donor.mismatch1 <- ldm[as.numeric(ldm$`Jaccard Index`) < as.numeric(input$threshold_down) & 
+                                       ldm$`Donor ID X` == ldm$`Donor ID Y`,]
   return (swap.report.donor.mismatch1)
   })
 

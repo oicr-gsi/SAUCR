@@ -11,6 +11,7 @@ GetOptions(
 	"fpr|f:s"        		=> \$opts{"fpr"},
     "refresh|r:s"			=> \$opts{"refresh"},
 	"prefix|p:s"     		=> \$opts{"prefix"},
+	"maxrecs|m:i"			=> \$opts{"maxrecs"},
 );
 validate_options(\%opts);
 
@@ -52,7 +53,9 @@ my @keys=qw/date project identity library info run platform pool wfid wfrunid fi
 my %fin;
 
 ### temp, for testing, restrict number of records
-@recs=@recs[0..40];
+if($opts{maxrecs}){
+	@recs=@recs[0..$opts{maxrecs}];
+}
 
 my %stats;
 
@@ -105,7 +108,7 @@ print STDERR "starting jaccard score generation\n";
 $stats{pairs}=($stats{count} * ($stats{count}+1))/2;
 
 print STDERR "metadata has $stats{count} records.  Expecting $stats{pairs} single direction pairs\n";
-<STDIN>;
+
 
 
 ### check records in the previous metadata report to asses which wfrundis are no longer used, and which are new
@@ -147,7 +150,7 @@ print STDERR "adding in new records\n";
 ### get any new fin files
 my @new;
 map{ push(@new,$_) if($fin{$_}{status} eq "new") }keys %fin;
-print Dumper(@new);<STDIN>;
+
 
 ### for all new run ids, generated jaccard scores againts ALL other ids, but only in one direction, alphabetically, by limskey
 for my $runid1(@new){
@@ -218,6 +221,10 @@ sub validate_options{
 		
 	}
 	
+	if($opts{maxrecs}){
+		print STDERR "limiting to $opts{maxrecs} fingerprintCollector records\n";
+	}
+	
 	$opts{script}="/.mounts/labs/gsiprojects/gsi/jaccard/scripts/jaccard_coeff.pair.pl";
 	
 	
@@ -231,6 +238,7 @@ sub usage{
 	print "\t--fpr.  The file provenence report to use, defaults to the system current fpr\n";
 	print "\t--prefix. The prefix to use on output files.  Defaults to 'saucr'.  files are prefix_metadata.txt and prefix_jaccard.txt\n";
 	print "\t--refresh. The prefix to use on previous files, for refresh.  If indicated, jaccard scores will only be calculated for new fingerprints\n";
+	print "\t--maxrecs. The maxiumum number of fingerprint records to process from FPR, for testing";
 	print "\t--help displays this usage message.\n";
 		
 

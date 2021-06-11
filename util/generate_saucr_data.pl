@@ -3,6 +3,7 @@ use warnings;
 use JSON::PP;
 use Data::Dumper;
 use File::Basename;
+use Getopt::Long;
 
 
 my %opts = ();
@@ -12,6 +13,13 @@ GetOptions(
 	"prefix|p:s"     		=> \$opts{"prefix"},
 );
 validate_options(\%opts);
+
+
+(open my $META,">",$opts{prefix} . "_metadata.txt") || die "unable to open metadata file for output";
+my @fields=qw/limskey project identity external_name library tissue_origin tissue_type group_id library_source_template_type prep_kit run platform pool file wfid wfrunid sites sites_nocovered sites_covered sites_wildtype sites_variant/;
+print $META join("\t",@fields) . "\n";
+
+(open my $JACCARD,">","saucr_jaccard.txt") || die "unable to open jaccard file for output";
 
 
 ### generate a time stamp
@@ -38,17 +46,15 @@ my @recs=`cat ../FPR.txt | grep fingerprintCollector | cut -f 1,2,8,14,18,19,23,
 my @keys=qw/date project identity library info run platform pool wfid wfrunid file limskey/;
 
 
-(open my $META,">",$opts{prefix} . "_metadata.txt") || die "unable to open metadata file for output";
-my @fields=qw/limskey project identity external_name library tissue_origin tissue_type group_id library_source_template_type prep_kit run platform pool file wfid wfrunid sites sites_nocovered sites_covered sites_wildtype sites_variant/;
-print $META join("\t",@fields) . "\n";
+
 
 ### collection of fin files for jaccard calcluations
 my %fin;
 
-### temp
-
+### temp, for testing, restrict number of records
 @recs=@recs[0..40];
 
+my %stats;
 
 for my $rec(@recs){
 	
@@ -60,6 +66,8 @@ for my $rec(@recs){
 	### bypass if 1. no fin file or 2. no file
 	next unless(-e $h{file});
 	next unless($h{file}=~/fin$/);
+	
+	$stats{count}++;
 	
 	### map the info key/vlue pairs into the hash
 	map{
@@ -90,16 +98,23 @@ for my $rec(@recs){
 }
 #print Dumper(%fin);<STDIN>;
 
+print STDERR "starting jaccard score generation\n";
+# module load sample-fingerprinting
+#jaccard_coeff_pair
+
+$stats{pairs}=($stats{count} * ($stats{count}+1))/2;
+
+print STDERR "metadata has $stats{count} records.  Expecting $stats{pairs} single direction pairs\n";
+<STDIN>;
+
+
 ### check records in the previous metadata report to asses which wfrundis are no longer used, and which are new
 if($opts{refresh}){
-	my $meta=$opts{refresh} . "_metadata.txt";
-	if(! -e $meta){
-	print STDERR "refresh metadata $meta not found\n";
 	
-}
-if(-e $meta){
-	my @recs=`cat $meta`;chomp @recs;
+	print STDERR "refreshing from $opts{refresh}\n";
+	my @recs=`cat $opts{refreshMeta}`;chomp @recs;
 	my @headers=split /\t/,shift @recs;
+    #### update status in the fin hash based on the refresh.  
 	map{
 		my %h;
 		@h{@headers}=split /\t/,$_;
@@ -110,25 +125,8 @@ if(-e $meta){
 			$fin{$wfrunid}{status}="remove";
 		}
 	}@recs;
-}
 
-
-### add records for any new wfids
-
-#exit;
-#print Dumper(%fin);
-#<STDIN>;
-
-
-
-print STDERR "starting jaccard score generation\n";
-# module load sample-fingerprinting
-#jaccard_coeff_pair
-(open my $JACCARD,">","saucr_jaccard.latest.txt");
-
-### carry over records from the last jaccard with valid wfrunids in the pair
-if(-e $jacc){
-	(open my $LASTJACC,"<",$jacc);
+	(open my $LASTJACC,"<",$opts{refreshJaccard});
 	for my $rec(<$LASTJACC>){
 		chomp $rec;
 		#print "$rec";<STDIN>;
@@ -145,46 +143,49 @@ if(-e $jacc){
 }
 
 
-print Dumper(%fin);<STDIN>;
-
+print STDERR "adding in new records\n";
 ### get any new fin files
 my @new;
-map{
-	push(@new,$_) if($fin{$_}{status} eq "new");
-	
-}keys %fin;
+map{ push(@new,$_) if($fin{$_}{status} eq "new") }keys %fin;
+print Dumper(@new);<STDIN>;
 
-print Dumper(@new);
-
-
-my @wfrunids=sort {$fin{$a}{limskey} ne $fin{$a}{limskey}} keys %fin;
-for my $i(0..$#wfrunids){
-	my $wfrunid1=$wfrunids[$i];
-	my $lk1=$fin{$wfrunid1}{limskey};
-	my $fin1=$fin{$wfrunid1}{fin};
-	my $status1=$fin{$wfrunid1}{status};
-	
-	next  unless(-e $fin1);
-	for my $j($i..$#wfrunids){
-		my $wfrunid2=$wfrunids[$i];
-		my $lk2=$fin{$wfrunid2}{limskey};
-		my $fin2=$fin{$wfrunid2}{fin};
-		my $status2=$fin{$wfrunid2}{status};
-		next unless(-e $fin2);
-
-		next unless($status1 eq "new" || $status2 eq "new");
-		print "$lk1 $lk2\n";
-	
-		#print "jaccard_coeff_pair -id1 $lk1 -fin1 $fin1 -id2 $lk2 -fin2 $fin2";exit;
-		my $json=`perl ../scripts/jaccard_coeff.pair.pl -id1 $lk1 -fin1 $fin1 -id2 $lk2 -fin2 $fin2`;
-		#print "$json";<STDIN>;
-		my $h=decode_json $json;
-		my $jaccard=$$h{jaccard_score} || 0;
-		my $covered=$$h{pair}{covered} || 0;
-		my $wfid_pair=$wfrunid1 . "_" . $wfrunid2;
-		print $JACCARD "$lk1\t$lk2\t$jaccard\t$covered\t$wfid_pair\n";
+### for all new run ids, generated jaccard scores againts ALL other ids, but only in one direction, alphabetically, by limskey
+for my $runid1(@new){
+	my $lk1=$fin{$runid1}{limskey};
+	my $status1=$fin{$runid1}{status};
+	my $fin1=$fin{$runid1}{fin};
+	for my $runid2(sort keys %fin){
+		my $lk2=$fin{$runid2}{limskey};
+		my $status2=$fin{$runid2}{status};
+		my $fin2=$fin{$runid2}{fin};
+		
+		my $check=0;
+		my @lk_array=sort($lk1,$lk2);
+		my @wf_array=sort($runid1,$runid2);
+		
+		if($status2 eq "new"){
+			### if both are new, then we only want to generate the record if they are in alphabetical order, by limskey.  This will prevent generating the record twice
+			$check=1 if($lk_array[0] eq $lk1);
+		}else{
+			$check=1;
+			## if the second record is not new, generated the jaccard metric, and save.  the other direction won't be run
+		}
+		
+		if($check){
+			my $json=`perl $opts{script} -id1 $lk1 -fin1 $fin1 -id2 $lk2 -fin2 $fin2`;
+			my $h=decode_json $json;
+			my $jaccard=$$h{jaccard_score} || 0;
+			my $covered=$$h{pair}{covered} || 0;
+			my $lk_pair=join("\t",@lk_array);
+			my $wfid_pair=join("_",@wf_array);
+			
+			print $JACCARD "$lk_pair\t$jaccard\t$covered\t$wfid_pair\n";
+		}
+		
 	}
 }
+
+
 
 
 
@@ -205,7 +206,7 @@ sub validate_options{
 		$opts{prefix}="saucr";
 	}
 	
-	if(!$opts{refresh}){
+	if($opts{refresh}){
 		$opts{refreshMeta}=$opts{refresh} . "_metadata.txt";
 		if(! -e $opts{refreshMeta}){
 			usage("ERROR : meta data file for refresh not found, $opts{refreshMeta}")
@@ -216,6 +217,10 @@ sub validate_options{
 		}
 		
 	}
+	
+	$opts{script}="/.mounts/labs/gsiprojects/gsi/jaccard/scripts/jaccard_coeff.pair.pl";
+	
+	
 }
 
 sub usage{

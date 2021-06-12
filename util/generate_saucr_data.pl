@@ -239,7 +239,7 @@ sub usage{
 	print "\t--fpr.  The file provenence report to use, defaults to the system current fpr\n";
 	print "\t--prefix. The prefix to use on output files.  Defaults to 'saucr'.  files are prefix_metadata.txt and prefix_jaccard.txt\n";
 	print "\t--refresh. The prefix to use on previous files, for refresh.  If indicated, jaccard scores will only be calculated for new fingerprints\n";
-	print "\t--maxrecs. The maxiumum number of fingerprint records to process from FPR, for testing";
+	print "\t--maxrecs. The maxiumum number of fingerprint records to process from FPR, for testing\n";
 	print "\t--help displays this usage message.\n";
 		
 

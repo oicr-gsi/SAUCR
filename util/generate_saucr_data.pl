@@ -9,9 +9,10 @@ use Getopt::Long;
 my %opts = ();
 GetOptions(
 	"fpr|f:s"        		=> \$opts{"fpr"},
-    "refresh|r:s"			=> \$opts{"refresh"},
+	"refresh|r:s"			=> \$opts{"refresh"},
 	"prefix|p:s"     		=> \$opts{"prefix"},
 	"maxrecs|m:i"			=> \$opts{"maxrecs"},
+	"help|h"			=> \$opts{"help"},
 );
 validate_options(\%opts);
 
@@ -20,7 +21,7 @@ validate_options(\%opts);
 my @fields=qw/limskey project identity external_name library tissue_origin tissue_type group_id library_source_template_type prep_kit run platform pool file wfid wfrunid sites sites_nocovered sites_covered sites_wildtype sites_variant/;
 print $META join("\t",@fields) . "\n";
 
-(open my $JACCARD,">","saucr_jaccard.txt") || die "unable to open jaccard file for output";
+(open my $JACCARD,">",$opts{prefix} ."_jaccard.txt") || die "unable to open jaccard file for output";
 
 
 ### generate a time stamp

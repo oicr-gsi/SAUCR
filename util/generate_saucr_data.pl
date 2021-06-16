@@ -4,6 +4,7 @@ use JSON::PP;
 use Data::Dumper;
 use File::Basename;
 use Getopt::Long;
+my $dirname = dirname(__FILE__);
 
 
 my %opts = ();
@@ -20,7 +21,7 @@ validate_options(\%opts);
 my @fields=qw/limskey project identity external_name library tissue_origin tissue_type group_id library_source_template_type prep_kit run platform pool file wfid wfrunid sites sites_nocovered sites_covered sites_wildtype sites_variant/;
 print $META join("\t",@fields) . "\n";
 
-(open my $JACCARD,">","saucr_jaccard.txt") || die "unable to open jaccard file for output";
+(open my $JACCARD,">",$opts{prefix} ."_jaccard.txt") || die "unable to open jaccard file for output";
 
 
 ### generate a time stamp
@@ -112,7 +113,10 @@ print STDERR "metadata has $stats{count} records.  Expecting $stats{pairs} singl
 
 
 ### check records in the previous metadata report to asses which wfrundis are no longer used, and which are new
+$stats{refresh}=0;$stats{remove}=0;$stats{new}=0;
 if($opts{refresh}){
+	
+	
 	
 	print STDERR "refreshing from $opts{refresh}\n";
 	my @recs=`cat $opts{refreshMeta}`;chomp @recs;
@@ -139,14 +143,17 @@ if($opts{refresh}){
 		#print Dumper($fin{$id1});<STDIN>;
 		#print Dumper($fin{$id2});<STDIN>;
 		
-		unless($fin{$id1}{status} eq "remove" || $fin{$id2}{status} eq "remove"){
+		if($fin{$id1}{status} eq "remove" || $fin{$id2}{status} eq "remove"){
+			$stats{remove}++;
+		}else{
 			print $JACCARD "$rec\n";
+			$stats{refresh}++;
 		}
 	}
 }
 
-
-print STDERR "adding in new records\n";
+print STDERR "$stats{refresh} jaccard scores carried over, $stats{remove} jaccard scores removed\n";
+print STDERR "adding in new jaccard scores\n";
 ### get any new fin files
 my @new;
 map{ push(@new,$_) if($fin{$_}{status} eq "new") }keys %fin;
@@ -183,12 +190,15 @@ for my $runid1(@new){
 			my $wfid_pair=join("_",@wf_array);
 			
 			print $JACCARD "$lk_pair\t$jaccard\t$covered\t$wfid_pair\n";
+			$stats{new}++;
 		}
 		
 	}
 }
 
+close $JACCARD;
 
+print STDERR "$stats{new} new jaccard scores added\n";
 
 
 
@@ -225,7 +235,7 @@ sub validate_options{
 		print STDERR "limiting to $opts{maxrecs} fingerprintCollector records\n";
 	}
 	
-	$opts{script}="/.mounts/labs/gsiprojects/gsi/jaccard/scripts/jaccard_coeff.pair.pl";
+	$opts{script}="$dirname/jaccard_coeff.pair.pl";
 	
 	
 }

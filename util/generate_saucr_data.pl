@@ -4,15 +4,15 @@ use JSON::PP;
 use Data::Dumper;
 use File::Basename;
 use Getopt::Long;
+my $dirname = dirname(__FILE__);
 
 
 my %opts = ();
 GetOptions(
 	"fpr|f:s"        		=> \$opts{"fpr"},
-	"refresh|r:s"			=> \$opts{"refresh"},
+    "refresh|r:s"			=> \$opts{"refresh"},
 	"prefix|p:s"     		=> \$opts{"prefix"},
 	"maxrecs|m:i"			=> \$opts{"maxrecs"},
-	"help|h"			=> \$opts{"help"},
 );
 validate_options(\%opts);
 
@@ -113,7 +113,10 @@ print STDERR "metadata has $stats{count} records.  Expecting $stats{pairs} singl
 
 
 ### check records in the previous metadata report to asses which wfrundis are no longer used, and which are new
+$stats{refresh}=0;$stats{remove}=0;$stats{new}=0;
 if($opts{refresh}){
+	
+	
 	
 	print STDERR "refreshing from $opts{refresh}\n";
 	my @recs=`cat $opts{refreshMeta}`;chomp @recs;
@@ -140,14 +143,17 @@ if($opts{refresh}){
 		#print Dumper($fin{$id1});<STDIN>;
 		#print Dumper($fin{$id2});<STDIN>;
 		
-		unless($fin{$id1}{status} eq "remove" || $fin{$id2}{status} eq "remove"){
+		if($fin{$id1}{status} eq "remove" || $fin{$id2}{status} eq "remove"){
+			$stats{remove}++;
+		}else{
 			print $JACCARD "$rec\n";
+			$stats{refresh}++;
 		}
 	}
 }
 
-
-print STDERR "adding in new records\n";
+print STDERR "$stats{refresh} jaccard scores carried over, $stats{remove} jaccard scores removed\n";
+print STDERR "adding in new jaccard scores\n";
 ### get any new fin files
 my @new;
 map{ push(@new,$_) if($fin{$_}{status} eq "new") }keys %fin;
@@ -184,12 +190,15 @@ for my $runid1(@new){
 			my $wfid_pair=join("_",@wf_array);
 			
 			print $JACCARD "$lk_pair\t$jaccard\t$covered\t$wfid_pair\n";
+			$stats{new}++;
 		}
 		
 	}
 }
 
+close $JACCARD;
 
+print STDERR "$stats{new} new jaccard scores added\n";
 
 
 
@@ -226,7 +235,7 @@ sub validate_options{
 		print STDERR "limiting to $opts{maxrecs} fingerprintCollector records\n";
 	}
 	
-	$opts{script}="/.mounts/labs/gsiprojects/gsi/jaccard/scripts/jaccard_coeff.pair.pl";
+	$opts{script}="$dirname/jaccard_coeff.pair.pl";
 	
 	
 }
@@ -239,7 +248,7 @@ sub usage{
 	print "\t--fpr.  The file provenence report to use, defaults to the system current fpr\n";
 	print "\t--prefix. The prefix to use on output files.  Defaults to 'saucr'.  files are prefix_metadata.txt and prefix_jaccard.txt\n";
 	print "\t--refresh. The prefix to use on previous files, for refresh.  If indicated, jaccard scores will only be calculated for new fingerprints\n";
-	print "\t--maxrecs. The maxiumum number of fingerprint records to process from FPR, for testing\n";
+	print "\t--maxrecs. The maxiumum number of fingerprint records to process from FPR, for testing";
 	print "\t--help displays this usage message.\n";
 		
 

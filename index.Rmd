@@ -2,10 +2,6 @@
 title: "Sample Authentication Check Report (SAuCR) - Prototype"
 runtime: shiny
 output: flexdashboard::flex_dashboard
-  # logo: ~/Desktop/logo-announcement-300x200.jpg
-  # orientation: columns
-  # vertical_layout: fill
-  # orientation: rows
 ---
 <style>                     
 .navbar {
@@ -29,27 +25,30 @@ library(circlize)
 source("Rscript/swap_report_essentials.R")
 ```
 
-
-```{r, echo = F, warning=F}
-# info about the all projects 
-meta<-read.delim(file="data/jaccard_metadata.txt",header=T,as.is=T,sep="\t")
-duplicate.ids<-meta$limskey[duplicated(meta$limskey)]
-x<-meta[meta$limskey %in% duplicate.ids,]
-meta<-meta[!duplicated(meta$limskey),]
-### set rownames to the limskey
-rownames(meta)<-meta$limskey
-# head(meta)
-projects <- unique(meta$project)
-# projects
-# names(master.report)
-# head(run.names)
+```{bash, echo = F}
+# prpject names and run ids
+cat `pwd`/data/saucr_metadata.txt | grep -v "WT" | cut -f2 | tail -n +2 | sort | uniq > `pwd`/data/projects
 ```
+
+```{r, echo = F}
+
+projects <- unique(readLines("data/projects"))
+
+# projects <- unique(project_run$V1)
+
+```
+
+
 ```{r, echo = F, warning=F}
 # read JM
 jaccard<-read.csv("data/jaccard_pairs.txt",header=F,as.is=T,sep="\t")
 colnames(jaccard)<-c("id1","id2","similarity","covered")
-jaccard$idmatch<-meta[jaccard$id1,]$identity==meta[jaccard$id2,]$identity
+# jaccard$idmatch<-meta[jaccard$id1,]$identity==meta[jaccard$id2,]$identity
 # head (jaccard)
+
+# read LODs
+LOD.scores <- read.csv("data/crosscheckfingerprints_lods.0.txt", sep = "\t")
+names(LOD.scores) <- c("id1","id2","similarity")
 ```
 
 Sidebar {.sidebar data-width=300}
@@ -64,7 +63,7 @@ Sidebar {.sidebar data-width=300}
 inputPanel(
   selectInput("project", label = "Project name:",
               choices = projects, multiple = T,
-              selected = "project_name")
+              selected = "HCCCFD")
 )
 # adding multiple project names
 observe({
@@ -76,8 +75,42 @@ observe({
 })
 
 
+# create a new subsetted metadata file for snapshot
+getProjectSubset <- reactive({
+  metafile <- "data/tmp_metadata.txt"
+  system("head -1 `pwd`/data/saucr_metadata.txt > `pwd`/data/tmp_metadata.txt")
+  write.table(input$project, file = "data/tmp_projects", sep = "\t", quote = F, col.names = F, row.names = F)
+  system("grep -f `pwd`/data/tmp_projects `pwd`/data/saucr_metadata.txt >> `pwd`/data/tmp_metadata.txt")
+  return (metafile)
+})
+
+# renderText({
+#   getProjectSubset()
+# })
 ```
+
+
+```{r, echo = F}
+
+# info about the all projects 
+getMeta <- reactive({
+  metaFile <- getProjectSubset()
+  meta<-read.delim(file=metaFile,header=T,as.is=T,sep="\t")
+  duplicate.ids<-meta$limskey[duplicated(meta$limskey)]
+  x<-meta[meta$limskey %in% duplicate.ids,]
+  meta<-meta[!duplicated(meta$limskey),]
+  ### set rownames to the limskey
+ rownames(meta)<-meta$limskey
+ return (meta)
+})
+
+# metaFields <- names(meta)
+
+```
+
+
 \
+
 ```{r, echo=F, warning=F}
 
 # select runs based on project file
@@ -94,6 +127,7 @@ inputPanel(
   )
 
 runID <- reactive({
+  meta <- getMeta()
   runID <- unique(meta[meta$project %in% input$`project`,]$run)
   return(runID)
 })
@@ -107,6 +141,7 @@ observe({
 })
 
 donorID <- reactive({
+  meta <- getMeta()
   donorID <- unique(meta[meta$`project` %in% input$`project`,]$identity)
   # print (donorID)
   if (!is.null(input$`run`)){
@@ -174,7 +209,8 @@ inputPanel(
 buildMatrix<-function(score.table,ids){
   ### this expects a three column dataframe, col1 and col2 are ids and col3 are scores
   colnames(score.table)<-c("id1","id2","similarity")
-  upper<-score.table[score.table$id1 %in% ids & score.table$id2 %in% ids,]
+  upper<-score.table[score.table$id1 %in% ids & 
+                       score.table$id2 %in% ids,]
   lower<-upper[,c(2,1,3)]
   colnames(lower)<-c("id1","id2","similarity")
   full<-rbind(upper,lower)
@@ -185,6 +221,7 @@ buildMatrix<-function(score.table,ids){
 
 
 getAdjMeta <- reactive({
+  meta <- getMeta()
   m.meta<-meta[meta$project %in% input$`project`,]
   if (! is.null(input$run)){
     run <- input$`run`
@@ -197,19 +234,24 @@ getAdjMeta <- reactive({
   if (! is.null(input$`donors`)){
     m.meta<-m.meta[m.meta$identity %in% input$`donors`,]
   }
+  o<-order(m.meta$project,m.meta$identity,m.meta$library)
+  m.meta<-m.meta[o,]
   return (m.meta)
 })
 
 getQueryJM <- reactive({
-  ###add identity match to the jaccard table
+  meta <- getMeta()
   m.meta <- getAdjMeta()
+  jaccard$idmatch<-meta[jaccard$id1,]$identity==meta[jaccard$id2,]$identity
+  # retain info that is available in the jaccard matrix file
   m<-buildMatrix(jaccard[,1:3],m.meta$limskey)
-  # m$<-sep$M[order(sep$M[,2]),]
-  # o<-order(m.meta$project,m.meta$identity,m.meta$library)
-  # m.meta<-m.meta[o,]
-  # m <- m[o,o]
+  m.meta <- m.meta[m.meta$limskey %in% row.names(m) & m.meta$limskey %in% colnames(m),]
+  o<-order(m.meta$project,m.meta$identity,m.meta$library)
+  m <- m[o,o]
   return (m)
 })
+
+
 ```
 \
 
@@ -269,12 +311,12 @@ renderPlot({
           width = unit(input$`resize`, "cm"), height = unit(input$`resize`, "cm"))
   if (input$`cutTreeByDonor` & !input$`cutTreeByRun`){
       hm <- Heatmap(data_frame, name = "Jaccard scores",
-          # row_km = length(unique(annotation_df$`Run ID`)),
           row_km = length(unique(annotation_df$`identity`)),
+          column_km = length(unique(annotation_df$`identity`)),
                 col = col_fun,
                 row_names_gp = gpar(fontsize = 10),
                 column_names_gp = gpar(fontsize = 12),
-                top_annotation = anno1,
+                # top_annotation = anno1,
                 left_annotation = anno2,
                 row_names_side = "left",
                 cluster_columns = input$`clusterOpt`,
@@ -289,11 +331,11 @@ renderPlot({
   if (input$`cutTreeByRun` & !input$`cutTreeByDonor`){
       hm <- Heatmap(data_frame, name = "Jaccard scores",
           column_km = length(unique(annotation_df$`run`)),
-          # column_km = length(unique(annotation_df$`Donor ID`)),
+          row_km = length(unique(annotation_df$`run`)),
                 col = col_fun,
                 row_names_gp = gpar(fontsize = 10),
                 column_names_gp = gpar(fontsize = 12),
-                top_annotation = anno1,
+                # top_annotation = anno1,
                 left_annotation = anno2,
                 row_names_side = "left",
                 cluster_columns = input$`clusterOpt`,
@@ -336,15 +378,17 @@ inputPanel(
 )
 
 observe({
+  # meta <- getMeta()
   updateSelectInput(
     session ,
     "displayMeta",
-    choices = colnames(meta)
+    choices = colnames(getMeta())
     )
   })
   
 renderTable({
   if (input$displaySampleInfo){
+    meta <- getMeta()
     m <- getAdjMeta()
     if (is.null(input$`displayMeta`)){
       m[,c("project", "identity", "external_name", "run", "group_id")]
@@ -383,6 +427,7 @@ inputPanel(
 )
 
 getFlaggedLibs <- reactive({
+  meta <- getMeta()
   # same donor; not similar
   m1 <- jaccard[jaccard$similarity < as.numeric(input$threshold_down),]
   m1$DonorId1 <- meta[m1$id1,'identity']
@@ -446,10 +491,10 @@ reactive(observe({
 renderTable({
   if (input$showDissimilarIDs){
     m3 <- getFlaggedLibs()
+    m3 <- m3[m3$Project1 %in% input$project & m3$Project2 %in% input$project,]
     if (is.null(input$`displaySpecificInfo`)){
       m3[,c("Project1","DonorId1", "group_id1","library1","Project2","DonorId2","group_id2","library2", "similarity","covered")]
     } else {
-      m3 <- m3[m3$Project1 %in% input$project & m3$Project2 %in% input$project,]
       m3[,input$displaySpecificInfo]
     }
   }
@@ -468,11 +513,132 @@ renderTable({
   if (input$showDissimilarIDsWithOtherProjects){
     m3 <- getFlaggedLibs()
     m3 <- m3[m3$Project1 %in% input$project & !m3$Project2 %in% input$project,]
-    m3[,c(input$displaySpecificInfo)]
     if (is.null(input$`displaySpecificInfo`)){
       m3[,c("Project1","DonorId1", "group_id1","library1","Project2","DonorId2","group_id2","library2", "similarity","covered")]
+    }else {
+      m3[,input$displaySpecificInfo]
     }
   }
 })
+```
+
+Crosscheck Fingerprints
+=====================================
+Row
+-------------------------------------
+```{r, echo =F}
+# read the LOD scores first 
+getQueryLOD <- reactive({
+  m.meta <- getAdjMeta()
+  m<-buildMatrix(LOD.scores,m.meta$limskey)
+  m.meta <- m.meta[m.meta$limskey %in% row.names(m) & m.meta$limskey %in% colnames(m),]
+  o<-order(m.meta$project,m.meta$identity,m.meta$library)
+  m <- m[o,o]
+  return (m)
+})
+
+
+inputPanel(
+  checkboxInput("showAnnotations2", label= "Show Sample IDs", value = FALSE, width = NULL),
+  checkboxInput("clusterOpt2", label= "Cluster heatmap", value = FALSE, width = NULL),
+  checkboxInput("showLegend2", label= "Show legend", value = FALSE, width = NULL)
+)
+inputPanel(
+  sliderInput("scalePlotHeight2", label = "Height of the figure", min = 100, max = 2000, value = 500, step = 10),
+  sliderInput("scalePlotWidth2", label = "Width of the figure", min = 100, max = 2000, value = 700, step = 10),
+  sliderInput("resize2", label = "Size of figure",
+              min = 10, max = 50, value = 10, step = 1)
+)
+
+inputPanel(
+  selectInput("additionalFields", label = "Additional fields to display on the heatmap",
+              choices = c("fields of interest"), selected = "fields", multiple = T, width = 2000)
+)
+
+renderText({
+  "Crosscheck Fingerprints tab currently does not support multi-project views and WT libraries."
+})
+
+afld <- reactive({
+  meta <- getMeta()
+  metaFields <- names(meta)
+  additionalFields <- metaFields
+  additionalFields <- additionalFields[!additionalFields %in% c("project", "identity", "run")]
+  return(additionalFields)
+})
+
+# renderTable({
+#   afld()
+# })
+
+observe({
+  updateSelectInput(
+    session ,
+    "additionalFields",
+    choices = afld()
+  )
+})
+
+
+# create annotation df dyanmically to add further info to the bars
+getAnnotationDF <- reactive({
+  meta.m <- getAdjMeta()
+  ld <- getQueryLOD()
+  data_frame = as.matrix(ld)
+  rowlabs <- rownames(data_frame) # format this later
+  annotation_df <- meta.m
+  annotation_df <- annotation_df[rowlabs,]
+  annotation_df <- annotation_df[,c("project", "identity", "run", input$`additionalFields`)]
+  # annotation_df <- annotation_df[,c("project", "identity", "run"),]
+  return (annotation_df)
+})
+
+# renderTable({
+#   getAnnotationDF()
+# })
+
+renderPlot({
+  meta.m <- getAdjMeta()
+  # head(meta.m)
+  ld <- getQueryLOD()
+  data_frame = as.matrix(ld)
+  min.val <- min(data_frame)
+  max.val <- max(data_frame)
+
+  # col_fun = colorRamp2(c(min.val, mid.val, max.val), c("#e5583e", "white", "#00cccc"))
+  col_fun = colorRamp2(c(min.val, max.val), c("white", "blue"))
+
+  rowlabs <- rownames(data_frame) # format this later
+  collabs <-  colnames(data_frame) # format this later
+
+  # annotations
+  annotation_df <- getAnnotationDF()
+  # annotations_df <- as.data.frame(sapply(annotation_df, as.character))
+
+  anno2 <- rowAnnotation(df = annotation_df,
+                         border = TRUE,
+                         show_legend = input$`showLegend2`,
+                         simple_anno_size = unit(1, "cm"))
+
+
+  hm <- Heatmap(data_frame, name = "Picard CrosscheckFingerprints LOD scores",
+                col = col_fun,
+                row_names_gp = gpar(fontsize = 8),
+                column_names_gp = gpar(fontsize = 8),
+                # top_annotation = anno1,
+                left_annotation = anno2,
+                row_names_side = "left",
+                cluster_columns = input$`clusterOpt2`,
+                cluster_rows = input$`clusterOpt2`,
+                row_labels = rowlabs,
+                column_labels = collabs,
+          show_column_names = input$`showAnnotations2`,
+          show_row_names = input$`showAnnotations2`,
+          # show_l = F,
+          width = unit(input$`resize2`, "cm"), height = unit(input$`resize2`, "cm"))
+  print (hm)
+},width = exprToFunction(as.numeric(input$scalePlotWidth2)),
+  height = exprToFunction(as.numeric(input$scalePlotHeight2)))
+
 ```
 

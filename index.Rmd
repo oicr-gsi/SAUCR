@@ -78,7 +78,7 @@ observe({
 # create a new subsetted metadata file for snapshot
 getProjectSubset <- reactive({
   metafile <- "data/tmp_metadata.txt"
-  system("head -1 `pwd`/data/saucr_metadata.txt > `pwd`/data/tmp_metadata.txt")
+  system("cat `pwd`/data/saucr_metadata.txt | head -1 > `pwd`/data/tmp_metadata.txt")
   write.table(input$project, file = "data/tmp_projects", sep = "\t", quote = F, col.names = F, row.names = F)
   system("grep -f `pwd`/data/tmp_projects `pwd`/data/saucr_metadata.txt >> `pwd`/data/tmp_metadata.txt")
   return (metafile)
@@ -602,11 +602,14 @@ renderPlot({
   # head(meta.m)
   ld <- getQueryLOD()
   data_frame = as.matrix(ld)
-  min.val <- min(data_frame)
-  max.val <- max(data_frame)
+  # min.val <- min(data_frame)
+  # max.val <- max(data_frame)
 
   # col_fun = colorRamp2(c(min.val, mid.val, max.val), c("#e5583e", "white", "#00cccc"))
-  col_fun = colorRamp2(c(min.val, max.val), c("white", "blue"))
+  col_fun = colorRamp2(breaks=c(-10000,0,10000), 
+                       c("blue", "white", "red"))
+  
+  
 
   rowlabs <- rownames(data_frame) # format this later
   collabs <-  colnames(data_frame) # format this later
